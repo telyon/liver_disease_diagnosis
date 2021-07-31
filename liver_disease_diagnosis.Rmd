@@ -1,0 +1,337 @@
+---
+title: "Liver disease Diagnosis"
+author: "Tobiloba Oyediran"
+date: "7/30/2021"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## OVERVIEW
+
+The Indian Liver Patient Dataset contains data about liver patients in India. The data set was collected from test samples in North East of Andhra Pradesh, India. It contains records of the observed levels of certain liver-related chemical in the samples collected from patients.
+
+**Data source: https://www.kaggle.com/jeevannagaraj/indian-liver-patient-dataset**
+
+The goal of this project is to develop an algorithm that doctors can use to diagnose liver disease from test samples collected from patients. To achieve this, the dataset was split into training-set (80%) and validation (20%) and the training-set was further split into train-set and test-set for developing the algorithm and reviewing the model performance. The measure of performance used is the overall accuracy of the predictions.
+
+The following steps and standard algorithms were applied to predict the outcome of the diagnosis:
+
+1. Randomly guessing the outcome of diagnosis
+2. Guessing the outcome while incorporating the observed prevalence in the dataset 
+3. K-nearest neighbour
+4. Logistic regression
+5. Linear discriminant analysis
+6. Quadratic discriminant analysis
+7. Random forest algorithm
+8. Model ensemble
+
+The algorithms that performed better were ensembled using majority voting to select the final prediction. There was significant improvement in the model performance (prediction accuracy increased from 0.5307692 to 0.7238095). The final ensemble algorithm was applied to the validation data. The model performance was better still (accuracy of 0.7457627).
+
+## ANALYSIS
+
+### Downloading the Indian Liver Patient Dataset
+
+```{r include=FALSE, results='hide'}
+library(tidyverse)
+library(data.table)
+library(caret)
+```
+
+```{r echo=FALSE, warning=FALSE, error=FALSE, message=FALSE}
+#  Downloading the dataset zip file
+dl <- tempfile()
+download.file("https://github.com/telyon/liver_disease_diagnosis/raw/main/Liver%20patients%20data.zip", dl)
+
+#  Extract to current working directory
+extract <- unzip(dl)
+#  load the data to a variable
+data <- read.csv(extract)
+```
+
+### Exploration
+```{r echo=FALSE, warning=FALSE, error=FALSE, message=FALSE}
+str(data)
+```
+Dataset contains **583 observations** of **11 variables**
+The long variable names were modified for convenience. The variable "Dataset" represents the diagnosis, and was modified by wrangling the data points to reflect the diagnosis.
+
+### Wrangling
+```{r echo=FALSE, warning=FALSE, error=FALSE, message=FALSE}
+colnames(data) <- c("age", "gender", "tot_bil", "direct_bil", "alkal_phos", 
+                    "alam_amino", "aspa_amino", "tot_proteins", "albu", 
+                    "albu_glo_ratio", "diagnosis")
+data <- data %>% mutate(gender = as.factor(gender),
+                        diagnosis = as.factor(ifelse(str_detect(diagnosis, "1"), "pos", "neg")))
+head(data)
+```
+Dataset is now in preferred format and tidy.
+
+### Any missing data? 
+```{r echo=FALSE, warning=FALSE, error=FALSE, message=FALSE}
+# any missing data?
+any(is.na(data))
+```
+Some values are missing from the dataset
+
+#### Which columns have missing values and how many values are missing?
+```{r echo=FALSE, warning=FALSE, error=FALSE, message=FALSE}
+missing <- which(is.na(data))
+# variables (columns) with missing data
+ceiling(missing/nrow(data))
+```
+There are 4 values missing from the same column (column 10). The variable is albu_glo_ratio
+
+#### Remove the observations that have missing values from the dataset.
+```{r echo=FALSE, warning=FALSE, error=FALSE, message=FALSE}
+# rows with missing value
+missing <- which(is.na(data$albu_glo_ratio))
+# remove the 4 rows with missing albu_glo_ratio value
+data_clean <- data[-(which(is.na(data$albu_glo_ratio))),]
+# clean up
+rm(data, dl, extract, missing)
+
+str(data_clean)
+```
+4 observations with missing albu_glo_ratio values were removed from the dataset. The cleaned dataset now has **579 observations**
+
+```{r echo=FALSE, warning=FALSE, error=FALSE, message=FALSE}
+head(data_clean)
+```
+Dataset is now in preferred format and tidy with no missing data, ready for analysis.
+
+### Further exploration
+Exploring the data further to get a grasp of the relationships (if any) that may exist among the variables in the dataset.
+```{r echo=FALSE, warning=FALSE, error=FALSE, message=FALSE}
+#  age range
+range(data_clean$age)
+#  age distribution
+hist(data_clean$age)
+```
+Variable "age" ranges from 4 to 90 and is normally distributed throughout the dataset
+
+#### How prevalent is liver disease in the dataset?
+```{r echo=FALSE, warning=FALSE, error=FALSE, message=FALSE}
+#  check proportion of sample that has liver disease
+mean(data_clean$diagnosis == "pos")
+```
+About 71% of the patients in the sample have positive diagnosis of liver disease. This shows that there is a high prevalence of liver disease in the dataset.
+
+#### Any relationship between age and diagnosis?
+```{r echo=FALSE, error=FALSE, message=FALSE, warning=FALSE}
+#  does age affect likelihood of liver disease?
+plot(data_clean$age, data_clean$diagnosis)
+```
+There is no observable relationship between patient age and liver disease diagnosis
+
+#### What of gender and diagnosis?
+```{r echo=FALSE, warning=FALSE, error=FALSE, message=FALSE}
+#  are there equal number of both gender?
+table(data_clean$gender)
+
+#  does gender affect likelihood of liver disease?
+ggplot(data_clean, aes(diagnosis, fill = gender))+
+  geom_bar(position = "dodge")
+```
+There is about 3 times more male patients than female in the sample. From the plot, there seems to be a slightly higher occurrence of positive diagnosis in male patients than in female patients
+
+```{r eval=FALSE, error=FALSE, message=FALSE, warning=FALSE, include=FALSE}
+#  proportion of each gender that has liver diseases
+count(data_clean, c("gender", "diagnosis")) %>% 
+  spread(diagnosis, freq) %>% 
+  mutate(disease_prop = pos/(pos+neg))
+```
+Proportion of males with positive diagnosis (74%) is higher than for females (65%). Also the proportion for males is higher than the overall proportion which is 71% as seen earlier, while the proportion for female positive diagnosis is lower. 
+
+#### Variations is liver sample components
+Next , let us investigate the  variations in liver chemicals with age, and gender, and if they affect likelihood of liver disease
+```{r echo=FALSE, warning=FALSE, error=FALSE, message=FALSE}
+data_clean %>% gather("component", "value", tot_bil, direct_bil, alkal_phos,
+                alam_amino, aspa_amino, tot_proteins, albu, albu_glo_ratio) %>%
+  ggplot(aes(age, value, col = diagnosis)) +
+  geom_point() +
+  facet_wrap(~component) +
+  ggtitle("Plot of the variations of the different chemicals with age")
+```
+
+```{r echo=FALSE, warning=FALSE, error=FALSE, message=FALSE}
+data_clean %>% gather("component", "value", tot_bil, direct_bil, alkal_phos,
+                      alam_amino, aspa_amino, tot_proteins, albu, albu_glo_ratio) %>%
+  ggplot(aes(gender, value, col = diagnosis)) +
+  geom_point(position = "jitter") +
+  facet_wrap(~component) +
+  ggtitle("Plot of the variations of the different chemicals among both genders")
+```
+Three chemical components (aspa_amino, alam_amino, and alkal_phos) show some slight variation with gender and age. Let's examine them further to see if they may be possible indicators of liver disease.
+
+```{r echo=FALSE, warning=FALSE, error=FALSE, message=FALSE}
+data_clean %>% ggplot(aes(aspa_amino, diagnosis)) +
+  geom_point(position = "jitter") +
+  scale_x_log10() +
+  ggtitle("Plot of the aspa_amino levels for both diagnoses")
+```
+
+```{r echo=FALSE, warning=FALSE, error=FALSE, message=FALSE}
+data_clean %>% ggplot(aes(alam_amino, diagnosis)) +
+  geom_point(position = "jitter") +
+  scale_x_log10() +
+  ggtitle("Plot of the alam_amino levels for both diagnoses")
+```
+
+```{r echo=FALSE, warning=FALSE, error=FALSE, message=FALSE}
+data_clean %>% ggplot(aes(alkal_phos, diagnosis)) +
+  geom_point(position = "jitter") + 
+  scale_x_log10() +
+  ggtitle("Plot of the alkal_phos levels for both diagnoses")
+```
+From the 3 plots, the distribution of values for all 3 chemicals are similar for both positive and negative diagnoses. This means none of these chemicals can be individually used to determine the diagnosis.
+
+## ANALYSIS
+
+Partition the data into training and validation sets
+```{r echo=FALSE, warning=FALSE, error=FALSE, message=FALSE}
+set.seed(35, sample.kind = "Rounding")
+sampler <- createDataPartition(data_clean$diagnosis, times=1, p=0.1, list = F)
+validation <- data_clean[sampler, ]
+training_set <- data_clean[-sampler, ]
+```
+
+### Building prediction model
+Since there are no immediately apparent pointers that can be used as a starting point in building the intended classification algorithm, we can start our analysis by just randomly guessing the outcome.
+
+**Step 1**: Randomly guessing the diagnosis
+```{r echo=FALSE, warning=FALSE, error=FALSE, message=FALSE}
+guess <- sample(c("neg", "pos"), nrow(training_set), replace = TRUE)
+guess_accuracy <- mean(guess == training_set$diagnosis)
+#  store accuracy in a table
+results <- data.frame("model" = "guessing", "Performace rating (accuracy)" = guess_accuracy)
+results
+```
+
+Taking into account the higher prevalence of liver disease in the dataset, we could increase the probability of a positive diagnosis in the guess: let's use probability of 0.7
+
+**Step 2**: Randomly guessing the diagnosis - with disease prevalence incorporated
+```{r echo=FALSE, warning=FALSE, error=FALSE, message=FALSE}
+mod_guess <- sample(c("neg", "pos"), nrow(training_set), replace = TRUE, prob = c(0.3, 0.7))
+mod_guess_accuracy <- mean(mod_guess == training_set$diagnosis)
+results <- bind_rows(results, data.frame("model" = "guessing with prevalence", "Performace rating (accuracy)" = mod_guess_accuracy))
+results
+```
+With disease prevalence incorporated, we see some improvement in model performance.
+
+Now let's apply some of the standard machine learning models to the data and see if we will get any better performance for this model.
+
+Partition the training data into and train and test sets
+```{r echo=FALSE, warning=FALSE, error=FALSE, message=FALSE}
+sampler2 <- createDataPartition(training_set$diagnosis, times = 1, p = 0.2, list = F)
+test_set <- training_set[sampler2, ]
+train_set <- training_set[-sampler2, ]
+```
+
+**Step 3**: Applying K-nearest neighbours algorithm for diagnosis prediction
+```{r echo=FALSE, warning=FALSE, error=FALSE, message=FALSE}
+y_hat_knn <- predict(train(diagnosis ~ ., data = train_set, method = "knn"), test_set)
+knn_accuracy <- mean(y_hat_knn == test_set$diagnosis)
+results <- bind_rows(results, data.frame("model" = "K - nearest neighbours algorithm", "Performace rating (accuracy)" = knn_accuracy))
+results
+```
+We see some improvement in performance beyond the improved guessing model
+
+**Steps 4-7*:
+Now let's apply other standard machine learning algorithms to generate predictions and see how they all perform
+```{r echo=FALSE, warning=FALSE, error=FALSE, message=FALSE}
+#  using logistic regression (GLM) algorithm
+y_hat_glm <- predict(train(diagnosis ~ ., data = train_set, method = "glm"), test_set)
+glm_accuracy <- mean(y_hat_glm == test_set$diagnosis)
+results <- bind_rows(results, data.frame("model" = "Logistic regression", "Performace rating (accuracy)" = glm_accuracy))
+
+
+#  using linear discriminant analysis (LDA) algorithm
+y_hat_lda <- predict(train(diagnosis ~ ., data = train_set, method = "lda"), test_set)
+lda_accuracy <- mean(y_hat_lda == test_set$diagnosis)
+results <- bind_rows(results, data.frame("model" = "Linear discriminant analysis", "Performace rating (accuracy)" = lda_accuracy))
+
+
+#  using quadratic discriminant analysis (QDA) algorithm
+y_hat_qda <- predict(fit_qda <- train(diagnosis ~ ., data = train_set, method = "qda"), test_set)
+qda_accuracy <- mean(y_hat_qda == test_set$diagnosis)
+results <- bind_rows(results, data.frame("model" = "Quadratic discriminant analysis", "Performace rating (accuracy)" = qda_accuracy))
+
+
+#  using random forest algorithm
+y_hat_rf <- predict(train(diagnosis ~ ., data = train_set, method = "rf", tuneGrid = data.frame(mtry = 2), nodesize = 26), test_set)
+rf_accuracy <- mean(y_hat_rf == test_set$diagnosis)
+results <- bind_rows(results, data.frame("model" = "Random forest", "Performace rating (accuracy)" = rf_accuracy))
+results
+```
+
+From the table of model performance results, we see that all the standard ML models, except the Quadratic discriminant analysis (QDA), do better than our improved guessing model. 
+The best performing model is the Logistic regression model, followed by the Random forest algorithm, and then the Linear discriminant analysis model.
+
+### Step 8: Creating an Ensemble
+Since the QDA algorithm preformed even worse than the improved guessing model, we can ignore the QDA algorithm. We can also ignore the KNN algorithm as it does not perform so much better than the improved guessing model.
+So we include only the 3 models that have a performance rating of 0.7 and above (i.e. Logistic regression, LDA, and Random forest) in the ensemble and use majority voting method to select the final prediction
+
+```{r echo=FALSE, warning=FALSE, error=FALSE, message=FALSE}
+#  Assemble the predictions form the different algorithms into a dataframe
+preds <- data.frame( "glm" = y_hat_glm, "lda" = y_hat_lda, "rf" = y_hat_rf)
+#  get a prediction from the ensemble : predict positive for 2/more positives
+preds <- data.frame(ifelse(preds == "pos", 1, 0)) %>% mutate(ens_pred = ifelse((glm+lda+rf) >= 2, "pos", "neg"))
+ens_accuracy <- mean(preds$ens_pred == test_set$diagnosis)
+results <- bind_rows(results, data.frame("model" = "Model ensemble", "Performace rating (accuracy)" = ens_accuracy))
+results
+```
+
+The performance of the model ensemble is better than that of the LDA, at par with Random forest, but not as good as the Logistic regression model.
+
+We can now apply this model ensemble to predict diagnosis in the validation data. This will be the final test of the performance of the model we have built so far.
+
+###  Final Evaluation 
+Using the whole training-set to train the algorithm and validation as the test set
+```{r echo=FALSE, warning=FALSE, error=FALSE, message=FALSE}
+#  chosen algorithms based on the analysis done
+algorithms <- c("glm", "lda", "rf")
+
+#  function to ensemble predictions with chosen algorithms
+predicted <- function(method) {
+  predict(train(diagnosis ~ ., training_set, method = algorithms), validation)
+}
+
+final_preds <- data.frame(sapply(algorithms, predicted))
+final_preds <- data.frame(ifelse(final_preds == "pos", 1, 0)) %>% mutate(ens_pred = ifelse((glm+lda+rf) >= 2, "pos", "neg"))
+ens_accuracy <- mean(final_preds$ens_pred == validation$diagnosis)
+paste("Final model ensemble performance rating is ", round(ens_accuracy, 7))
+```
+
+Let's compare this final performance level with what could have been obtained if we simply used the standard model with the best performance on the training data (the Logistic regression model),
+```{r echo=FALSE, warning=FALSE, error=FALSE, message=FALSE}
+final_glm <- mean(predict(train(diagnosis ~ ., training_set, method = "glm"), validation) == validation$diagnosis)
+paste("Final Logistic regression model performance rating is ", round(final_glm, 7))
+```
+
+## RESULTS
+
+From the results table, it is evident that:
+
+1. Incorporating the idea of disease prevalence in the sample produced better performance while randomly guessing the diagnosis. This shows that even a little understanding of the dataset can help to improve predictions.
+
+2. There is incremental improvement in performance of the model when standard machine learning models were applied to generate predictions from the training data.
+
+3. Although the model ensemble did not perform as well as the Logistic regression model on the training data, it performed equally well when applied to the validation data.
+
+3. Comparing the performance of the model ensemble on the test_set and validation data, the model performed better when a larger training set is used (training_set is larger than train_set). This suggests that the larger the training dataset, the lower the error of prediction using this model.
+
+
+### CONCLUSION
+The model performance has been significantly improved by creating an ensemble of the best performing standard machine learning models.
+
+#### Limitation of this work
+This report does not explore the possibility of creating an algorithm that could predict diagnosis based on slight changes in the level of chemical components. There could be particular level of the chemical components beyond which diagnosis can be accurately predicted as either positive or negative. Also a mixture or combination of some of the variables in certain ways could produce direct pointers to accurate diagnosis.
+
+#### Future work
+To further improve the performance of the prediction model, principal component analysis could be used to explore the possibility of discovering indicators that can directly point to accurate diagnosis of liver disease.
+
+
+
